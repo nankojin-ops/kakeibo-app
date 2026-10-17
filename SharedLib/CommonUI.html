@@ -1,0 +1,100 @@
+<!-- ========================================================================= -->
+<!-- 共通ライブラリ提供: フロントエンド共通UIコンポーネント -->
+<!-- ========================================================================= -->
+<div id="sharedLoadingOverlay" class="fixed inset-0 bg-slate-900/50 z-50 flex flex-col items-center justify-center hidden">
+  <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-3"></div>
+  <div id="sharedLoadingMessage" class="text-white font-bold text-sm tracking-wide">処理中...</div>
+</div>
+
+<div id="sharedStatusMessage" class="mt-4 text-center font-semibold hidden"></div>
+
+<script>
+/**
+ * 全画面ローディング表示コントロール
+ * @param {string} [msg='処理中...'] - 表示テキスト
+ */
+function showSharedLoading(msg) {
+  const el = document.getElementById('sharedLoadingOverlay');
+  const msgEl = document.getElementById('sharedLoadingMessage');
+  if (msgEl) msgEl.textContent = msg || '処理中...';
+  if (el) el.classList.remove('hidden');
+}
+
+/**
+ * 全画面ローディング非表示
+ */
+function hideSharedLoading() {
+  const el = document.getElementById('sharedLoadingOverlay');
+  if (el) el.classList.add('hidden');
+}
+
+/**
+ * 共通ステータスメッセージ表示
+ * @param {string} text - 表示メッセージ
+ * @param {boolean} [isError=false] - エラー表示フラグ
+ * @param {number} [autoHideMs=0] - 自動非表示までのミリ秒 (0の場合は非表示にしない)
+ */
+function showSharedMessage(text, isError = false, autoHideMs = 0) {
+  const msgDiv = document.getElementById('sharedStatusMessage');
+  if (!msgDiv) return;
+
+  msgDiv.innerText = text;
+  msgDiv.className = isError 
+    ? "mt-4 text-center text-sm font-semibold text-red-600 bg-red-50 p-3 rounded border border-red-200"
+    : "mt-4 text-center text-sm font-semibold text-green-600 bg-green-50 p-3 rounded border border-green-200";
+
+  msgDiv.classList.remove('hidden');
+
+  if (autoHideMs > 0) {
+    setTimeout(hideSharedMessage, autoHideMs);
+  }
+}
+
+/**
+ * 共通ステータスメッセージ非表示
+ */
+function hideSharedMessage() {
+  const msgDiv = document.getElementById('sharedStatusMessage');
+  if (msgDiv) msgDiv.classList.add('hidden');
+}
+
+/**
+ * Flatpickr カレンダーの共通初期化ヘルパー関数
+ * @param {string|HTMLElement} target - 対象のCSSセレクタまたは要素
+ * @param {Object} [customOptions={}] - Flatpickr の個別設定オプション
+ * @param {string[]} [holidaysList=[]] - 祝日日付文字列配列 (YYYY-MM-DD)
+ * @return {Object} Flatpickr インスタンス
+ */
+function initSharedFlatpickr(target, customOptions = {}, holidaysList = []) {
+  if (typeof flatpickr === 'undefined') {
+    console.error('Flatpickr ライブラリが読み込まれていません。');
+    return null;
+  }
+
+  const baseConfig = {
+    locale: 'ja',
+    dateFormat: 'Y-m-d',
+    allowInput: false,
+    disableMobile: true,
+    closeOnSelect: true,
+    onDayCreate: function(dObj, dStr, fp, dayElem) {
+      const date = dayElem.dateObj;
+      const day = date.getDay();
+      const dateStr = [
+        date.getFullYear(),
+        ('0' + (date.getMonth() + 1)).slice(-2),
+        ('0' + date.getDate()).slice(-2)
+      ].join('-');
+
+      if (day === 0) dayElem.classList.add('is-sunday');
+      if (day === 6) dayElem.classList.add('is-saturday');
+      if (holidaysList && holidaysList.includes(dateStr)) {
+        dayElem.classList.add('is-holiday');
+      }
+    }
+  };
+
+  const finalConfig = Object.assign({}, baseConfig, customOptions);
+  return flatpickr(target, finalConfig);
+}
+</script>

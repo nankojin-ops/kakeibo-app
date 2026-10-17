@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('Stylesheet'); ?>
+</head>
+<body class="bg-slate-100 min-h-screen flex items-center justify-center p-4">
+
+<div class="bg-white rounded-xl shadow-lg p-6 sm:p-8 w-full max-w-md border border-slate-200 box-border overflow-hidden">
+  
+  <!-- メインタブナビゲーション -->
+  <div class="flex border-b border-slate-200 mb-6">
+    <button id="tabInput" onclick="switchTab('input')" class="w-1/3 py-2 text-center font-bold text-blue-600 border-b-2 border-blue-600 focus:outline-none">
+      入力
+    </button>
+    <button id="tabHistory" onclick="switchTab('history')" class="w-1/3 py-2 text-center font-bold text-slate-400 hover:text-slate-600 focus:outline-none">
+      履歴
+    </button>
+    <button id="tabSettings" onclick="switchTab('settings')" class="w-1/3 py-2 text-center font-bold text-slate-400 hover:text-slate-600 focus:outline-none">
+      設定
+    </button>
+  </div>
+
+  <!-- 1. 入力フォーム画面 -->
+  <div id="viewInput" class="block">
+    <h2 class="text-xl font-bold text-center text-slate-800 mb-4">収支登録</h2>
+    <form id="balanceForm" class="space-y-4">
+      <div>
+        <label for="date" class="block text-sm font-semibold text-slate-600 mb-1">日付</label>
+        <input type="date" id="date" name="date" required class="w-full max-w-full box-border px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition min-w-0">
+      </div>
+
+      <div>
+        <label for="type" class="block text-sm font-semibold text-slate-600 mb-1">区分</label>
+        <select id="type" name="type" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition bg-white">
+          <option value="支出">支出</option>
+          <option value="収入">収入</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="category" class="block text-sm font-semibold text-slate-600 mb-1">カテゴリ</label>
+        <select id="category" name="category" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition bg-white">
+          <option value="" disabled selected>選択してください</option>
+          <? if (typeof categories !== 'undefined' && categories.length > 0) { ?>
+            <? categories.forEach(function(cat) { ?>
+              <option value="<?= cat ?>"><?= cat ?></option>
+            <? }); ?>
+          <? } ?>
+        </select>
+      </div>
+
+      <div>
+        <label for="amount" class="block text-sm font-semibold text-slate-600 mb-1">金額 (円)</label>
+        <input type="number" id="amount" name="amount" inputmode="numeric" placeholder="金額を入力" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+      </div>
+
+      <div>
+        <label for="memo" class="block text-sm font-semibold text-slate-600 mb-1">メモ</label>
+        <textarea id="memo" name="memo" rows="2" placeholder="自由に入力" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition"></textarea>
+      </div>
+
+      <button type="submit" id="submitBtn" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-md transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed mt-2">
+        データを記録する
+      </button>
+    </form>
+  </div>
+
+  <!-- 2. 月別集計履歴画面 -->
+  <div id="viewHistory" class="hidden space-y-4">
+    <h2 class="text-xl font-bold text-center text-slate-800 mb-2">月別集計履歴</h2>
+
+    <!-- 共通検索条件フィルター -->
+    <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-3">
+      <div>
+        <label for="selectYearMonth" class="block text-xs font-semibold text-slate-600 mb-1">対象年月</label>
+        <!-- 年月変更時はサーバーから新月データ通信取得 -->
+        <select id="selectYearMonth" onchange="fetchMonthlySummary()" class="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition bg-white">
+          <!-- JavaScriptで動的生成 -->
+        </select>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label for="selectType" class="block text-xs font-semibold text-slate-600 mb-1">収支区分</label>
+          <!-- 区分変更時は通信なしのフロント即時フィルタリング -->
+          <select id="selectType" onchange="applyClientFilter()" class="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition bg-white">
+            <option value="ALL">すべて</option>
+            <option value="支出">支出</option>
+            <option value="収入">収入</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="selectCategory" class="block text-xs font-semibold text-slate-600 mb-1">カテゴリ</label>
+          <!-- カテゴリ変更時は通信なしのフロント即時フィルタリング -->
+          <select id="selectCategory" onchange="applyClientFilter()" class="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition bg-white">
+            <option value="ALL">すべて</option>
+            <? if (typeof categories !== 'undefined' && categories.length > 0) { ?>
+              <? categories.forEach(function(cat) { ?>
+                <option value="<?= cat ?>"><?= cat ?></option>
+              <? }); ?>
+            <? } ?>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- 履歴内サブタブナビゲーション -->
+    <div class="flex border-b border-slate-200 text-sm">
+      <button id="subTabCategory" onclick="switchHistorySubTab('category')" class="w-1/2 py-2 text-center font-bold text-blue-600 border-b-2 border-blue-600 focus:outline-none">
+        カテゴリ別集計
+      </button>
+      <button id="subTabDetail" onclick="switchHistorySubTab('detail')" class="w-1/2 py-2 text-center font-bold text-slate-400 hover:text-slate-600 focus:outline-none">
+        日別明細
+      </button>
+    </div>
+
+    <!-- サブタブ1: カテゴリ別集計コンテンツ -->
+    <div id="subViewCategory" class="block space-y-4">
+      <!-- 概要カード（カテゴリ別集計タブ内のみ表示） -->
+      <div class="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-1">
+        <div class="flex justify-between text-sm text-slate-600">
+          <span>総収入:</span>
+          <span id="totalIncome" class="font-bold text-green-600">¥0</span>
+        </div>
+        <div class="flex justify-between text-sm text-slate-600">
+          <span>総支出:</span>
+          <span id="totalExpense" class="font-bold text-red-600">¥0</span>
+        </div>
+        <div class="flex justify-between text-base font-bold text-slate-800 pt-2 border-t border-slate-200">
+          <span>収支差額:</span>
+          <span id="netBalance">¥0</span>
+        </div>
+      </div>
+
+      <!-- カテゴリ別割合グラフ -->
+      <div class="bg-white p-4 rounded-lg border border-slate-200 space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-bold text-slate-700">カテゴリ別割合</span>
+          <div class="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs">
+            <button type="button" id="chartTypeExpense" onclick="setChartType('支出')" class="px-3 py-1 focus:outline-none">支出</button>
+            <button type="button" id="chartTypeIncome" onclick="setChartType('収入')" class="px-3 py-1 focus:outline-none">収入</button>
+          </div>
+        </div>
+
+        <div id="chartWrapper" class="relative mx-auto" style="height: 200px; max-width: 240px;">
+          <canvas id="categoryChart"></canvas>
+        </div>
+        <div id="chartEmpty" class="hidden text-center text-sm text-slate-400 py-6">該当するデータがありません</div>
+
+        <ul id="chartLegend" class="space-y-1 text-xs text-slate-700"></ul>
+      </div>
+
+      <!-- カテゴリ別集計テーブル -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="border-b border-slate-300 text-xs text-slate-500 bg-slate-50">
+              <th class="py-2 px-3">カテゴリ</th>
+              <th class="py-2 px-3 text-right">合計金額</th>
+            </tr>
+          </thead>
+          <tbody id="categoryTableBody" class="text-sm text-slate-700 divide-y divide-slate-200">
+            <!-- JavaScriptで動的描画 -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- サブタブ2: 日別明細コンテンツ -->
+    <div id="subViewDetail" class="hidden">
+      <div class="overflow-x-auto max-h-80 border border-slate-200 rounded-lg">
+        <table class="w-full text-left border-collapse min-w-[340px]">
+          <thead class="sticky top-0 bg-slate-100 z-10">
+            <tr class="border-b border-slate-300 text-xs text-slate-500">
+              <th class="py-2 px-2 whitespace-nowrap">日付</th>
+              <th class="py-2 px-2 whitespace-nowrap">区分</th>
+              <th class="py-2 px-2 whitespace-nowrap">カテゴリ</th>
+              <th class="py-2 px-2 text-right whitespace-nowrap">金額</th>
+              <th class="py-2 px-2 whitespace-nowrap">メモ</th>
+            </tr>
+          </thead>
+          <tbody id="detailTableBody" class="text-xs text-slate-700 divide-y divide-slate-200 bg-white">
+            <!-- JavaScriptで動的描画 -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 設定画面 -->
+  <div id="viewSettings" class="hidden">
+    <h2 class="text-xl font-bold text-center text-slate-800 mb-4">アプリ設定</h2>
+
+    <!-- 認証フォーム -->
+    <div id="adminAuthContainer" class="space-y-4">
+      <p class="text-xs text-slate-500 text-center">設定の閲覧・変更にはパスワードが必要です。</p>
+      <div>
+        <label for="adminPassword" class="block text-sm font-semibold text-slate-600 mb-1">パスワード</label>
+        <div class="relative">
+          <input type="password" id="adminPassword" onkeydown="handleAdminPasswordKeydown(event)" placeholder="パスワードを入力" class="w-full px-3 py-2 pr-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+          <button type="button" onclick="togglePasswordVisibility('adminPassword', this)" class="absolute inset-y-0 right-0 px-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <button type="button" id="authBtn" onclick="verifyAdminPassword()" class="w-full py-2 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-lg shadow transition">
+        認証する
+      </button>
+    </div>
+
+    <!-- 設定編集フォーム -->
+    <div id="settingsFormContainer" class="hidden space-y-4">
+      <!-- 設定内サブタブナビゲーション -->
+      <div class="flex border-b border-slate-200 text-sm">
+        <button type="button" id="subTabSettingsBasic" onclick="switchSettingsSubTab('basic')" class="w-1/2 py-2 text-center font-bold text-blue-600 border-b-2 border-blue-600 focus:outline-none">
+          基本設定
+        </button>
+        <button type="button" id="subTabSettingsCategory" onclick="switchSettingsSubTab('category')" class="w-1/2 py-2 text-center font-bold text-slate-400 hover:text-slate-600 focus:outline-none">
+          カテゴリ管理
+        </button>
+      </div>
+
+      <!-- サブタブ1: 基本設定 -->
+      <div id="subViewSettingsBasic" class="block">
+        <form id="settingsForm" class="space-y-4">
+          <div>
+            <label for="settingSpreadsheetId" class="block text-sm font-semibold text-slate-600 mb-1">スプレッドシートID</label>
+            <input type="text" id="settingSpreadsheetId" name="spreadsheetId" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+          </div>
+
+          <div>
+            <label for="settingNotificationEmail" class="block text-sm font-semibold text-slate-600 mb-1">通知先メールアドレス</label>
+            <input type="email" id="settingNotificationEmail" name="notificationEmail" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+          </div>
+
+          <div>
+            <label for="settingNewPassword" class="block text-sm font-semibold text-slate-600 mb-1">新しい管理者パスワード (任意)</label>
+            <div class="relative">
+              <input type="password" id="settingNewPassword" name="newPassword" placeholder="変更する場合のみ入力" class="w-full px-3 py-2 pr-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+              <button type="button" onclick="togglePasswordVisibility('settingNewPassword', this)" class="absolute inset-y-0 right-0 px-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <button type="submit" id="saveSettingsBtn" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow transition">
+            設定を保存する
+          </button>
+        </form>
+      </div>
+
+      <!-- サブタブ2: カテゴリ管理 -->
+      <div id="subViewSettingsCategory" class="hidden space-y-4">
+        <p class="text-xs text-slate-500 leading-relaxed">
+          ※プルダウンは履歴の登録件数が多い順に自動ソートされます。同数の場合はここの並び順が優先されます。
+        </p>
+
+        <!-- 新規カテゴリ追加フォーム -->
+        <div>
+          <label for="newCategoryInput" class="block text-sm font-semibold text-slate-600 mb-1">新規カテゴリ追加</label>
+          <div class="flex gap-2">
+            <input type="text" id="newCategoryInput" onkeydown="handleNewCategoryKeydown(event)" placeholder="新しいカテゴリ名を入力" class="flex-1 min-w-0 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+            <button type="button" id="addCategoryBtn" onclick="addCategoryItem()" class="px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold rounded-lg shadow transition whitespace-nowrap">
+              追加
+            </button>
+          </div>
+        </div>
+
+        <!-- カテゴリ一覧（定義順・登録件数表示・上下移動・編集・削除） -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-sm font-semibold text-slate-600">カテゴリ一覧（定義順）</span>
+            <span class="text-xs text-slate-400">カッコ内は履歴登録数</span>
+          </div>
+          <ul id="categoryManageList" class="space-y-2 max-h-72 overflow-y-auto pr-1">
+            <!-- JavaScriptで動的生成 -->
+          </ul>
+        </div>
+
+        <button type="button" id="saveCategoriesBtn" onclick="saveCategories()" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow transition disabled:opacity-50 disabled:cursor-not-allowed">
+          カテゴリを保存する
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="status" class="mt-4 p-3 rounded-lg text-center font-medium text-sm hidden"></div>
+
+</div>
+
+<?!= include('JavaScript'); ?>
+</body>
+</html>

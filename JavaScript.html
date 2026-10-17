@@ -1,0 +1,983 @@
+<script>
+  let isAuthenticated = false;
+  let currentMonthlyData = null;
+  let editingCategories = [];
+  let categoryCounts = {};
+
+  // ▼ 追加
+  let categoryChart = null;
+  let chartType = '支出'; // 'ALL' 選択時のグラフ表示区分
+  const CHART_COLORS = [
+    '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
+    '#ec4899', '#14b8a6', '#f97316', '#64748b', '#84cc16'
+  ];
+
+  document.addEventListener('DOMContentLoaded', function() {
+    // 日付入力フィールドの初期値を本日に設定
+    const dateInput = document.getElementById('date');
+    if (dateInput) {
+      dateInput.value = getTodayString();
+    }
+
+    initYearMonthOptions();
+    document.getElementById('balanceForm').addEventListener('submit', submitForm);
+    document.getElementById('settingsForm').addEventListener('submit', submitSettings);
+  });
+
+  /**
+   * パスワード入力フィールドの表示/非表示を切り替える
+   * @param {string} inputId - 切り替え対象のinput要素ID
+   * @param {HTMLElement} btn - クリックされたボタン要素
+   */
+  function togglePasswordVisibility(inputId, btn) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    const isPassword = input.type === 'password';
+    input.type = isPassword ? 'text' : 'password';
+
+    if (isPassword) {
+      btn.innerHTML = `
+        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858-5.908a8.14 8.14 0 013.182-.763c4.478 0 8.268 2.943 9.542 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21f-9-9" />
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3l18 18" />
+        </svg>`;
+    } else {
+      btn.innerHTML = `
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+        </svg>`;
+    }
+  }
+
+  /**
+   * 過去12ヶ月分の年月プルダウンを動的に作成する
+   */
+  function initYearMonthOptions() {
+    const select = document.getElementById('selectYearMonth');
+    if (!select) return;
+
+    select.innerHTML = '';
+    const now = new Date();
+
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const ymValue = `${yyyy}-${mm}`;
+
+      const option = document.createElement('option');
+      option.value = ymValue;
+      option.textContent = `${yyyy}年${mm}月`;
+      select.appendChild(option);
+    }
+  }
+
+  /**
+   * 今日の日付文字列(YYYY-MM-DD)を取得する
+   * @returns {string} 日付文字列 (YYYY-MM-DD)
+   */
+  function getTodayString() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  /**
+   * メインタブを切り替える
+   * @param {string} tabName - 対象タブID ('input' | 'history' | 'settings')
+   */
+  function switchTab(tabName) {
+    const viewInput = document.getElementById('viewInput');
+    const viewHistory = document.getElementById('viewHistory');
+    const viewSettings = document.getElementById('viewSettings');
+
+    const tabInput = document.getElementById('tabInput');
+    const tabHistory = document.getElementById('tabHistory');
+    const tabSettings = document.getElementById('tabSettings');
+
+    const statusDiv = document.getElementById('status');
+    statusDiv.classList.add('hidden');
+
+    viewInput.classList.add('hidden');
+    viewInput.classList.remove('block');
+    viewHistory.classList.add('hidden');
+    viewHistory.classList.remove('block');
+    viewSettings.classList.add('hidden');
+    viewSettings.classList.remove('block');
+
+    const inactiveClass = 'w-1/3 py-2 text-center font-bold text-slate-400 hover:text-slate-600 focus:outline-none';
+    const activeClass = 'w-1/3 py-2 text-center font-bold text-blue-600 border-b-2 border-blue-600 focus:outline-none';
+
+    tabInput.className = inactiveClass;
+    tabHistory.className = inactiveClass;
+    tabSettings.className = inactiveClass;
+
+    if (tabName === 'input') {
+      viewInput.classList.remove('hidden');
+      viewInput.classList.add('block');
+      tabInput.className = activeClass;
+    } else if (tabName === 'history') {
+      viewHistory.classList.remove('hidden');
+      viewHistory.classList.add('block');
+      tabHistory.className = activeClass;
+      fetchMonthlySummary();
+    } else if (tabName === 'settings') {
+      viewSettings.classList.remove('hidden');
+      viewSettings.classList.add('block');
+      tabSettings.className = activeClass;
+    }
+  }
+
+  /**
+   * 履歴タブ内のサブタブ（カテゴリ別集計 / 日別明細）を切り替える
+   * @param {string} subTabName - 対象サブタブ名 ('category' | 'detail')
+   */
+  function switchHistorySubTab(subTabName) {
+    const subViewCategory = document.getElementById('subViewCategory');
+    const subViewDetail = document.getElementById('subViewDetail');
+
+    const subTabCategory = document.getElementById('subTabCategory');
+    const subTabDetail = document.getElementById('subTabDetail');
+
+    const inactiveClass = 'w-1/2 py-2 text-center font-bold text-slate-400 hover:text-slate-600 focus:outline-none';
+    const activeClass = 'w-1/2 py-2 text-center font-bold text-blue-600 border-b-2 border-blue-600 focus:outline-none';
+
+    subViewCategory.classList.add('hidden');
+    subViewCategory.classList.remove('block');
+    subViewDetail.classList.add('hidden');
+    subViewDetail.classList.remove('block');
+
+    subTabCategory.className = inactiveClass;
+    subTabDetail.className = inactiveClass;
+
+    if (subTabName === 'category') {
+      subViewCategory.classList.remove('hidden');
+      subViewCategory.classList.add('block');
+      subTabCategory.className = activeClass;
+      // ▼ 追加
+      if (categoryChart) setTimeout(function() { categoryChart.resize(); }, 0);
+    } else if (subTabName === 'detail') {
+      subViewDetail.classList.remove('hidden');
+      subViewDetail.classList.add('block');
+      subTabDetail.className = activeClass;
+    }
+  }
+
+  /**
+   * 収支登録フォームの送信処理
+   * @param {Event} event - フォームイベント
+   */
+  function submitForm(event) {
+    event.preventDefault();
+    const form = document.getElementById('balanceForm');
+    const submitBtn = document.getElementById('submitBtn');
+
+    const formData = {
+      date: form.date.value,
+      type: form.type.value,
+      category: form.category.value,
+      amount: form.amount.value,
+      memo: form.memo.value
+    };
+
+    submitBtn.disabled = true;
+    showStatus('⏳ 記録中...', 'bg-blue-50 text-blue-700 border border-blue-200');
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        if (response.success) {
+          showStatus(response.message, 'bg-green-50 text-green-700 border border-green-200');
+          form.amount.value = '';
+          form.memo.value = '';
+          if (Array.isArray(response.sortedCategories) && response.sortedCategories.length > 0) {
+            updateCategorySelects(response.sortedCategories);
+          }
+          if (response.counts && typeof response.counts === 'object') {
+            categoryCounts = response.counts;
+          } else if (formData.category) {
+            const catKey = String(formData.category).trim();
+            categoryCounts[catKey] = getSafeCategoryCount(catKey) + 1;
+          }
+          if (editingCategories.length > 0) {
+            renderCategoryManageList();
+          }
+          setTimeout(function() {
+            const statusDiv = document.getElementById('status');
+            statusDiv.classList.add('hidden');
+          }, 3000);
+        } else {
+          showStatus(response.message, 'bg-red-50 text-red-700 border border-red-200');
+        }
+        submitBtn.disabled = false;
+      })
+      .withFailureHandler(function(error) {
+        showStatus('⚠️ 通信エラーが発生しました。', 'bg-red-50 text-red-700 border border-red-200');
+        submitBtn.disabled = false;
+      })
+      .saveBalanceFromWeb(formData);
+  }
+
+  /**
+   * 対象年月における全データをサーバーから取得する（通信発生）
+   */
+  function fetchMonthlySummary() {
+    const selectYM = document.getElementById('selectYearMonth');
+    if (!selectYM) return;
+
+    const selectedYM = selectYM.value;
+
+    selectYM.disabled = true;
+    showStatus('⏳ 集計データ取得中...', 'bg-blue-50 text-blue-700 border border-blue-200');
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        selectYM.disabled = false;
+        if (response.success) {
+          const statusDiv = document.getElementById('status');
+          statusDiv.classList.add('hidden');
+          
+          // キャッシュ変数へ保存
+          currentMonthlyData = response.data;
+          
+          // 即時フィルタリング描画を実行
+          applyClientFilter();
+        } else {
+          showStatus(response.message, 'bg-red-50 text-red-700 border border-red-200');
+        }
+      })
+      .withFailureHandler(function(error) {
+        selectYM.disabled = false;
+        showStatus('⚠️ データ取得失敗: 通信エラーが発生しました。', 'bg-red-50 text-red-700 border border-red-200');
+      })
+      .getMonthlySummaryFromWeb(selectedYM);
+  }
+
+  /**
+   * フロントエンドのメモリ上で選択条件（区分・カテゴリ）に基づき即時フィルタリング・再計算・描画を行う（通信なし）
+   */
+  function applyClientFilter() {
+    if (!currentMonthlyData || !currentMonthlyData.details) return;
+
+    const selectType = document.getElementById('selectType');
+    const selectCat = document.getElementById('selectCategory');
+
+    const selectedType = selectType ? selectType.value : 'ALL';
+    const selectedCat = selectCat ? selectCat.value : 'ALL';
+
+    // 1. メモリ上の全明細データに対するフィルタリング
+    const filteredDetails = currentMonthlyData.details.filter(item => {
+      const matchType = (selectedType === 'ALL' || item.type === selectedType);
+      const matchCat = (selectedCat === 'ALL' || item.category === selectedCat);
+      return matchType && matchCat;
+    });
+
+    // 2. フィルタリング結果に基づく数値・集計オブジェクトの再計算
+    let totalIncome = 0;
+    let totalExpense = 0;
+    const categorySummary = {};
+
+    filteredDetails.forEach(item => {
+      const amt = item.amount;
+      const cat = item.category || '未分類';
+
+      if (!categorySummary[cat]) {
+        categorySummary[cat] = 0;
+      }
+      categorySummary[cat] += amt;
+
+      if (amt > 0) {
+        totalIncome += amt;
+      } else {
+        totalExpense += Math.abs(amt);
+      }
+    });
+
+    const netBalance = totalIncome - totalExpense;
+
+    // 3. 概要カードの更新
+    document.getElementById('totalIncome').innerText = `¥${totalIncome.toLocaleString()}`;
+    document.getElementById('totalExpense').innerText = `¥${totalExpense.toLocaleString()}`;
+
+    const netElem = document.getElementById('netBalance');
+    netElem.innerText = `¥${netBalance.toLocaleString()}`;
+    if (netBalance < 0) {
+      netElem.className = 'font-bold text-red-600';
+    } else {
+      netElem.className = 'font-bold text-green-600';
+    }
+
+    // 4. カテゴリ別集計テーブルの描画
+    const catTbody = document.getElementById('categoryTableBody');
+    catTbody.innerHTML = '';
+
+    const categories = Object.keys(categorySummary);
+    if (categories.length === 0) {
+      const row = document.createElement('tr');
+      row.innerHTML = `<td colspan="2" class="py-4 text-center text-slate-400">該当する集計データがありません</td>`;
+      catTbody.appendChild(row);
+    } else {
+      categories.forEach(cat => {
+        const amount = categorySummary[cat];
+        const row = document.createElement('tr');
+
+        const isExpense = amount < 0;
+        const displayAmount = `¥${Math.abs(amount).toLocaleString()}`;
+        const amountClass = isExpense ? 'text-red-600' : 'text-green-600';
+        const prefix = isExpense ? '-' : '+';
+
+        const tdCat = document.createElement('td');
+        tdCat.className = 'py-2 px-3 font-medium';
+        tdCat.textContent = cat;
+
+        const tdAmt = document.createElement('td');
+        tdAmt.className = `py-2 px-3 text-right font-semibold ${amountClass}`;
+        tdAmt.textContent = `${prefix}${displayAmount}`;
+
+        row.appendChild(tdCat);
+        row.appendChild(tdAmt);
+        catTbody.appendChild(row);
+      });
+    }
+
+    // 4.5 カテゴリ別割合グラフの描画
+    renderCategoryChart(filteredDetails, selectedType);
+
+    // 5. 日別詳細明細テーブルの描画
+    const detailTbody = document.getElementById('detailTableBody');
+    detailTbody.innerHTML = '';
+
+    if (filteredDetails.length === 0) {
+      const row = document.createElement('tr');
+      row.innerHTML = `<td colspan="5" class="py-4 text-center text-slate-400">該当する明細データがありません</td>`;
+      detailTbody.appendChild(row);
+      return;
+    }
+
+    filteredDetails.forEach(item => {
+      const row = document.createElement('tr');
+      const isExpense = item.amount < 0 || item.type === '支出';
+      const displayAmount = `¥${Math.abs(item.amount).toLocaleString()}`;
+      const amountClass = isExpense ? 'text-red-600 font-semibold' : 'text-green-600 font-semibold';
+      const prefix = item.amount < 0 ? '-' : (item.amount > 0 ? '+' : '');
+
+      const tdDate = document.createElement('td');
+      tdDate.className = 'py-2 px-2 whitespace-nowrap';
+      tdDate.textContent = item.date;
+
+      const tdType = document.createElement('td');
+      tdType.className = 'py-2 px-2 whitespace-nowrap';
+      const typeSpan = document.createElement('span');
+      typeSpan.className = `px-1.5 py-0.5 rounded text-[10px] ${item.type === '収入' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`;
+      typeSpan.textContent = item.type;
+      tdType.appendChild(typeSpan);
+
+      const tdCat = document.createElement('td');
+      tdCat.className = 'py-2 px-2 whitespace-nowrap font-medium';
+      tdCat.textContent = item.category;
+
+      const tdAmt = document.createElement('td');
+      tdAmt.className = `py-2 px-2 text-right whitespace-nowrap ${amountClass}`;
+      tdAmt.textContent = `${prefix}${displayAmount}`;
+
+      const tdMemo = document.createElement('td');
+      tdMemo.className = 'py-2 px-2 truncate max-w-[120px]';
+      tdMemo.title = item.memo || '';
+      tdMemo.textContent = item.memo || '-';
+
+      row.appendChild(tdDate);
+      row.appendChild(tdType);
+      row.appendChild(tdCat);
+      row.appendChild(tdAmt);
+      row.appendChild(tdMemo);
+      detailTbody.appendChild(row);
+    });
+  }
+
+  /**
+   * 管理者パスワード入力時のキー判定（Enterキー対応）
+   * @param {KeyboardEvent} event - キーボードイベント
+   */
+  function handleAdminPasswordKeydown(event) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      verifyAdminPassword();
+    }
+  }
+
+  /**
+   * 管理者認証を実行する
+   */
+  function verifyAdminPassword() {
+    const passwordInput = document.getElementById('adminPassword');
+    const authBtn = document.getElementById('authBtn');
+    
+    const password = passwordInput.value ? passwordInput.value.replace(/[\s\u3000]+/g, '') : '';
+
+    if (!password) {
+      showStatus('⚠️ パスワードを入力してください。', 'bg-red-50 text-red-700 border border-red-200');
+      return;
+    }
+
+    authBtn.disabled = true;
+    const originalBtnText = authBtn.innerText;
+    authBtn.innerText = '認証中...';
+    showStatus('⏳ 認証確認中...', 'bg-blue-50 text-blue-700 border border-blue-200');
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        authBtn.disabled = false;
+        authBtn.innerText = originalBtnText;
+
+        if (response.success) {
+          isAuthenticated = true;
+          document.getElementById('adminAuthContainer').classList.add('hidden');
+          document.getElementById('settingsFormContainer').classList.remove('hidden');
+          const statusDiv = document.getElementById('status');
+          statusDiv.classList.add('hidden');
+          loadSettingsData();
+          loadCategoryManagementData();
+        } else {
+          showStatus(response.message, 'bg-red-50 text-red-700 border border-red-200');
+        }
+      })
+      .withFailureHandler(function(error) {
+        authBtn.disabled = false;
+        authBtn.innerText = originalBtnText;
+        showStatus('⚠️ 通信エラーが発生しました。', 'bg-red-50 text-red-700 border border-red-200');
+      })
+      .verifyAdminPasswordFromWeb(password);
+  }
+
+  /**
+   * サーバーから設定プロパティを取得してフォームに展開する
+   */
+  function loadSettingsData() {
+    showStatus('⏳ 設定情報取得中...', 'bg-blue-50 text-blue-700 border border-blue-200');
+
+    google.script.run
+      .withSuccessHandler(function(data) {
+        document.getElementById('settingSpreadsheetId').value = data.spreadsheetId || '';
+        document.getElementById('settingNotificationEmail').value = data.notificationEmail || '';
+        const statusDiv = document.getElementById('status');
+        statusDiv.classList.add('hidden');
+      })
+      .withFailureHandler(function(error) {
+        showStatus('⚠️ 設定取得エラーが発生しました。', 'bg-red-50 text-red-700 border border-red-200');
+      })
+      .getScriptPropertiesFromWeb();
+  }
+
+  /**
+   * 設定フォームの送信処理
+   * @param {Event} event - フォームイベント
+   */
+  function submitSettings(event) {
+    event.preventDefault();
+    const form = document.getElementById('settingsForm');
+    const saveBtn = document.getElementById('saveSettingsBtn');
+
+    const settingsData = {
+      spreadsheetId: form.settingSpreadsheetId.value.trim(),
+      notificationEmail: form.settingNotificationEmail.value.trim(),
+      newPassword: form.settingNewPassword.value ? form.settingNewPassword.value.replace(/[\s\u3000]+/g, '') : ''
+    };
+
+    saveBtn.disabled = true;
+    showStatus('⏳ 設定保存中...', 'bg-blue-50 text-blue-700 border border-blue-200');
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        saveBtn.disabled = false;
+        if (response.success) {
+          showStatus(response.message, 'bg-green-50 text-green-700 border border-green-200');
+          form.settingNewPassword.value = '';
+          loadCategoryManagementData();
+        } else {
+          showStatus(response.message, 'bg-red-50 text-red-700 border border-red-200');
+        }
+      })
+      .withFailureHandler(function(error) {
+        saveBtn.disabled = false;
+        showStatus('⚠️ 通信エラーが発生しました。', 'bg-red-50 text-red-700 border border-red-200');
+      })
+      .saveScriptPropertiesFromWeb(settingsData);
+  }
+
+  /**
+   * 設定タブ内のサブタブ（基本設定 / カテゴリ管理）を切り替える
+   * @param {string} subTabName - 対象サブタブ名 ('basic' | 'category')
+   */
+  function switchSettingsSubTab(subTabName) {
+    const subViewBasic = document.getElementById('subViewSettingsBasic');
+    const subViewCategory = document.getElementById('subViewSettingsCategory');
+
+    const subTabBasic = document.getElementById('subTabSettingsBasic');
+    const subTabCategory = document.getElementById('subTabSettingsCategory');
+
+    const statusDiv = document.getElementById('status');
+    if (statusDiv) {
+      statusDiv.classList.add('hidden');
+    }
+
+    const inactiveClass = 'w-1/2 py-2 text-center font-bold text-slate-400 hover:text-slate-600 focus:outline-none';
+    const activeClass = 'w-1/2 py-2 text-center font-bold text-blue-600 border-b-2 border-blue-600 focus:outline-none';
+
+    subViewBasic.classList.add('hidden');
+    subViewBasic.classList.remove('block');
+    subViewCategory.classList.add('hidden');
+    subViewCategory.classList.remove('block');
+
+    subTabBasic.className = inactiveClass;
+    subTabCategory.className = inactiveClass;
+
+    if (subTabName === 'basic') {
+      subViewBasic.classList.remove('hidden');
+      subViewBasic.classList.add('block');
+      subTabBasic.className = activeClass;
+    } else if (subTabName === 'category') {
+      subViewCategory.classList.remove('hidden');
+      subViewCategory.classList.add('block');
+      subTabCategory.className = activeClass;
+      if (editingCategories.length === 0) {
+        loadCategoryManagementData();
+      }
+    }
+  }
+
+  /**
+   * 入力画面(#category)と履歴画面(#selectCategory)のカテゴリプルダウンを動的に更新する
+   * @param {string[]} sortedCategories - 登録数降順にソートされたカテゴリ名配列
+   */
+  function updateCategorySelects(sortedCategories) {
+    if (!Array.isArray(sortedCategories) || sortedCategories.length === 0) return;
+
+    // 1. 入力タブのカテゴリプルダウン (#category)
+    const inputSelect = document.getElementById('category');
+    if (inputSelect) {
+      const prevInputVal = inputSelect.value;
+      inputSelect.innerHTML = '';
+
+      const placeholderOpt = document.createElement('option');
+      placeholderOpt.value = '';
+      placeholderOpt.disabled = true;
+      placeholderOpt.textContent = '選択してください';
+      inputSelect.appendChild(placeholderOpt);
+
+      sortedCategories.forEach(function(cat) {
+        const opt = document.createElement('option');
+        opt.value = cat;
+        opt.textContent = cat;
+        inputSelect.appendChild(opt);
+      });
+
+      if (prevInputVal && sortedCategories.indexOf(prevInputVal) !== -1) {
+        inputSelect.value = prevInputVal;
+      } else {
+        placeholderOpt.selected = true;
+        inputSelect.value = '';
+      }
+    }
+
+    // 2. 履歴タブのカテゴリフィルタープルダウン (#selectCategory)
+    const historySelect = document.getElementById('selectCategory');
+    if (historySelect) {
+      const prevHistoryVal = historySelect.value;
+      historySelect.innerHTML = '';
+
+      const allOpt = document.createElement('option');
+      allOpt.value = 'ALL';
+      allOpt.textContent = 'すべて';
+      historySelect.appendChild(allOpt);
+
+      sortedCategories.forEach(function(cat) {
+        const opt = document.createElement('option');
+        opt.value = cat;
+        opt.textContent = cat;
+        historySelect.appendChild(opt);
+      });
+
+      if (prevHistoryVal && (prevHistoryVal === 'ALL' || sortedCategories.indexOf(prevHistoryVal) !== -1)) {
+        historySelect.value = prevHistoryVal;
+      } else {
+        historySelect.value = 'ALL';
+        if (currentMonthlyData && currentMonthlyData.details) {
+          applyClientFilter();
+        }
+      }
+    }
+  }
+
+  /**
+   * サーバーからカテゴリ管理データを取得して一覧およびプルダウンに反映する
+   */
+  function loadCategoryManagementData() {
+    google.script.run
+      .withSuccessHandler(function(response) {
+        if (response && Array.isArray(response.rawCategories)) {
+          editingCategories = response.rawCategories.slice();
+          categoryCounts = response.counts || {};
+          renderCategoryManageList();
+          if (Array.isArray(response.sortedCategories) && response.sortedCategories.length > 0) {
+            updateCategorySelects(response.sortedCategories);
+          }
+        }
+      })
+      .withFailureHandler(function(error) {
+        showStatus('⚠️ カテゴリ情報の取得に失敗しました。', 'bg-red-50 text-red-700 border border-red-200');
+      })
+      .getCategoryManagementDataFromWeb();
+  }
+
+  /**
+   * Object.prototypeのプロパティ名（toString等）に影響されず安全にカテゴリ登録件数を取得する
+   * @param {string} categoryName - カテゴリ名
+   * @returns {number} 登録件数
+   */
+  function getSafeCategoryCount(categoryName) {
+    if (!categoryCounts || typeof categoryCounts !== 'object') return 0;
+    const key = String(categoryName ?? '').trim();
+    if (Object.prototype.hasOwnProperty.call(categoryCounts, key) && typeof categoryCounts[key] === 'number') {
+      return categoryCounts[key];
+    }
+    return 0;
+  }
+
+  /**
+   * カテゴリ管理一覧(#categoryManageList)をDOM APIで安全に描画する
+   */
+  function renderCategoryManageList() {
+    const listEl = document.getElementById('categoryManageList');
+    if (!listEl) return;
+
+    listEl.innerHTML = '';
+
+    editingCategories.forEach(function(cat, index) {
+      const li = document.createElement('li');
+      li.className = 'flex items-center gap-1.5 bg-slate-50 p-2 rounded-lg border border-slate-200';
+
+      // 上下並び替えボタン群
+      const orderBtnGroup = document.createElement('div');
+      orderBtnGroup.className = 'flex flex-col gap-0.5 flex-shrink-0';
+
+      const upBtn = document.createElement('button');
+      upBtn.type = 'button';
+      upBtn.className = 'px-1.5 py-0.5 text-[10px] leading-none rounded border border-slate-300 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed';
+      upBtn.textContent = '▲';
+      upBtn.title = '上へ移動';
+      upBtn.disabled = (index === 0);
+      upBtn.onclick = function() { moveCategoryItem(index, -1); };
+
+      const downBtn = document.createElement('button');
+      downBtn.type = 'button';
+      downBtn.className = 'px-1.5 py-0.5 text-[10px] leading-none rounded border border-slate-300 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed';
+      downBtn.textContent = '▼';
+      downBtn.title = '下へ移動';
+      downBtn.disabled = (index === editingCategories.length - 1);
+      downBtn.onclick = function() { moveCategoryItem(index, 1); };
+
+      orderBtnGroup.appendChild(upBtn);
+      orderBtnGroup.appendChild(downBtn);
+
+      // カテゴリ名編集用 input
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = cat;
+      input.className = 'flex-1 min-w-0 px-2.5 py-1.5 text-sm border border-slate-300 rounded-md bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none';
+      input.oninput = function(e) {
+        editingCategories[index] = e.target.value;
+        const countVal = getSafeCategoryCount(e.target.value);
+        countBadge.textContent = '(' + countVal + '件)';
+      };
+
+      // 登録件数バッジ
+      const countBadge = document.createElement('span');
+      countBadge.className = 'text-xs text-slate-400 whitespace-nowrap flex-shrink-0';
+      const count = getSafeCategoryCount(cat);
+      countBadge.textContent = '(' + count + '件)';
+
+      // 削除ボタン
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 rounded border border-transparent hover:border-red-200 transition whitespace-nowrap flex-shrink-0';
+      delBtn.textContent = '削除';
+      delBtn.onclick = function() { removeCategoryItem(index); };
+
+      li.appendChild(orderBtnGroup);
+      li.appendChild(input);
+      li.appendChild(countBadge);
+      li.appendChild(delBtn);
+      listEl.appendChild(li);
+    });
+  }
+
+  /**
+   * 新規カテゴリ入力欄でのEnterキー押下ハンドラ
+   * @param {KeyboardEvent} event - キーボードイベント
+   */
+  function handleNewCategoryKeydown(event) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      addCategoryItem();
+    }
+  }
+
+  /**
+   * 新規カテゴリを編集リストに追加する
+   */
+  function addCategoryItem() {
+    const input = document.getElementById('newCategoryInput');
+    if (!input) return;
+
+    const newCat = input.value.trim();
+    if (!newCat) {
+      showStatus('⚠️ 追加するカテゴリ名を入力してください。', 'bg-red-50 text-red-700 border border-red-200');
+      return;
+    }
+
+    const trimmedList = editingCategories.map(function(c) { return String(c ?? '').trim(); });
+    if (trimmedList.indexOf(newCat) !== -1) {
+      showStatus('⚠️ 同じ名前のカテゴリが既に存在します。', 'bg-red-50 text-red-700 border border-red-200');
+      return;
+    }
+
+    editingCategories.push(newCat);
+    input.value = '';
+    const statusDiv = document.getElementById('status');
+    if (statusDiv) statusDiv.classList.add('hidden');
+    renderCategoryManageList();
+  }
+
+  /**
+   * カテゴリの定義順を上下に入れ替える
+   * @param {number} index - 対象インデックス
+   * @param {number} direction - 移動方向 (-1: 上, 1: 下)
+   */
+  function moveCategoryItem(index, direction) {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= editingCategories.length) return;
+
+    const temp = editingCategories[index];
+    editingCategories[index] = editingCategories[targetIndex];
+    editingCategories[targetIndex] = temp;
+    renderCategoryManageList();
+  }
+
+  /**
+   * 指定インデックスのカテゴリを編集リストから削除する
+   * @param {number} index - 削除対象インデックス
+   */
+  function removeCategoryItem(index) {
+    if (editingCategories.length <= 1) {
+      showStatus('⚠️ カテゴリは最低1件以上必要です。', 'bg-red-50 text-red-700 border border-red-200');
+      return;
+    }
+    editingCategories.splice(index, 1);
+    renderCategoryManageList();
+  }
+
+  /**
+   * 編集したカテゴリ一覧を検証しサーバーへ保存する
+   */
+  function saveCategories() {
+    if (!Array.isArray(editingCategories) || editingCategories.length === 0) {
+      showStatus('⚠️ カテゴリは最低1件以上登録してください。', 'bg-red-50 text-red-700 border border-red-200');
+      return;
+    }
+
+    const cleaned = [];
+    const seen = new Set();
+
+    for (let i = 0; i < editingCategories.length; i++) {
+      const val = String(editingCategories[i] ?? '').trim();
+      if (!val) {
+        showStatus('⚠️ 空のカテゴリ名は登録できません。', 'bg-red-50 text-red-700 border border-red-200');
+        return;
+      }
+      if (seen.has(val)) {
+        showStatus('⚠️ 重複するカテゴリ名があります: ' + val, 'bg-red-50 text-red-700 border border-red-200');
+        return;
+      }
+      seen.add(val);
+      cleaned.push(val);
+    }
+
+    const saveBtn = document.getElementById('saveCategoriesBtn');
+    if (saveBtn) saveBtn.disabled = true;
+    showStatus('⏳ カテゴリ保存中...', 'bg-blue-50 text-blue-700 border border-blue-200');
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        if (saveBtn) saveBtn.disabled = false;
+        if (response && response.success) {
+          showStatus(response.message, 'bg-green-50 text-green-700 border border-green-200');
+          editingCategories = Array.isArray(response.rawCategories) ? response.rawCategories.slice() : cleaned.slice();
+          if (response.counts) {
+            categoryCounts = response.counts;
+          }
+          renderCategoryManageList();
+          if (Array.isArray(response.sortedCategories) && response.sortedCategories.length > 0) {
+            updateCategorySelects(response.sortedCategories);
+          }
+        } else {
+          showStatus((response && response.message) ? response.message : '⚠️ カテゴリの保存に失敗しました。', 'bg-red-50 text-red-700 border border-red-200');
+        }
+      })
+      .withFailureHandler(function(error) {
+        if (saveBtn) saveBtn.disabled = false;
+        showStatus('⚠️ 通信エラーが発生しました。', 'bg-red-50 text-red-700 border border-red-200');
+      })
+      .saveCategoriesFromWeb(cleaned);
+  }
+
+  /**
+   * グラフの表示区分（支出/収入）を切り替える
+   * @param {string} type - '支出' | '収入'
+   */
+  function setChartType(type) {
+    chartType = type;
+    applyClientFilter();
+  }
+
+  /**
+   * 切り替えボタンの見た目を更新する
+   * @param {string} activeType - 現在表示中の区分
+   * @param {boolean} locked - 上部フィルターで区分が固定されている場合 true
+   */
+  function updateChartToggle(activeType, locked) {
+    const btns = [
+      { el: document.getElementById('chartTypeExpense'), type: '支出', color: 'bg-red-500' },
+      { el: document.getElementById('chartTypeIncome'),  type: '収入', color: 'bg-green-500' }
+    ];
+    btns.forEach(function(b) {
+      if (!b.el) return;
+      const active = b.type === activeType;
+      b.el.className = 'px-3 py-1 focus:outline-none ' +
+        (active ? b.color + ' text-white font-bold' : 'bg-white text-slate-500') +
+        (locked ? ' cursor-not-allowed opacity-70' : '');
+      b.el.disabled = locked;
+    });
+  }
+
+  /**
+   * カテゴリ別割合のドーナツグラフと凡例を描画する
+   * @param {Array} details - フィルタ済み明細
+   * @param {string} selectedType - 上部フィルターの区分 ('ALL' | '支出' | '収入')
+   */
+  function renderCategoryChart(details, selectedType) {
+    const locked = selectedType !== 'ALL';
+    const effectiveType = locked ? selectedType : chartType;
+    updateChartToggle(effectiveType, locked);
+
+    const wrapper = document.getElementById('chartWrapper');
+    const emptyEl = document.getElementById('chartEmpty');
+    const legend = document.getElementById('chartLegend');
+    const canvas = document.getElementById('categoryChart');
+    if (!wrapper || !canvas || !legend) return;
+
+    // カテゴリごとの金額合計（絶対値）
+    const totals = {};
+    details.forEach(function(item) {
+      if (item.type !== effectiveType) return;
+      const cat = item.category || '未分類';
+      totals[cat] = (totals[cat] || 0) + Math.abs(item.amount);
+    });
+
+    const entries = Object.keys(totals)
+      .map(function(k) { return [k, totals[k]]; })
+      .filter(function(e) { return e[1] > 0; })
+      .sort(function(a, b) { return b[1] - a[1]; });
+    const sum = entries.reduce(function(s, e) { return s + e[1]; }, 0);
+
+    legend.innerHTML = '';
+
+    // データなし
+    if (entries.length === 0) {
+      if (categoryChart) { categoryChart.destroy(); categoryChart = null; }
+      wrapper.classList.add('hidden');
+      emptyEl.classList.remove('hidden');
+      return;
+    }
+    wrapper.classList.remove('hidden');
+    emptyEl.classList.add('hidden');
+
+    const labels = entries.map(function(e) { return e[0]; });
+    const values = entries.map(function(e) { return e[1]; });
+    const colors = entries.map(function(_, i) { return CHART_COLORS[i % CHART_COLORS.length]; });
+
+    // グラフ描画（既存インスタンスがあれば更新）
+    if (typeof Chart !== 'undefined') {
+      if (categoryChart) {
+        categoryChart.data.labels = labels;
+        categoryChart.data.datasets[0].data = values;
+        categoryChart.data.datasets[0].backgroundColor = colors;
+        categoryChart.update();
+      } else {
+        categoryChart = new Chart(canvas, {
+          type: 'doughnut',
+          data: {
+            labels: labels,
+            datasets: [{ data: values, backgroundColor: colors, borderWidth: 1 }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '55%',
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: function(ctx) {
+                    const pct = (ctx.parsed / sum * 100).toFixed(1);
+                    return ctx.label + ': ¥' + ctx.parsed.toLocaleString() + ' (' + pct + '%)';
+                  }
+                }
+              }
+            }
+          }
+        });
+      }
+    }
+
+    // 凡例（色・カテゴリ名・金額・割合）
+    entries.forEach(function(e, i) {
+      const pct = (e[1] / sum * 100).toFixed(1);
+      const li = document.createElement('li');
+      li.className = 'flex items-center justify-between';
+
+      const left = document.createElement('span');
+      left.className = 'flex items-center min-w-0';
+      const dot = document.createElement('span');
+      dot.className = 'inline-block w-3 h-3 rounded-full mr-2 flex-shrink-0';
+      dot.style.backgroundColor = colors[i];
+      const name = document.createElement('span');
+      name.className = 'truncate';
+      name.textContent = e[0]; // textContent でXSS回避
+      left.appendChild(dot);
+      left.appendChild(name);
+
+      const right = document.createElement('span');
+      right.className = 'font-semibold whitespace-nowrap ml-2';
+      right.textContent = '¥' + e[1].toLocaleString() + ' (' + pct + '%)';
+
+      li.appendChild(left);
+      li.appendChild(right);
+      legend.appendChild(li);
+    });
+  }
+
+  /**
+   * ステータスメッセージを表示する
+   * @param {string} text - メッセージ本文
+   * @param {string} colorClasses - 適用するCSSクラス
+   */
+  function showStatus(text, colorClasses) {
+    const statusDiv = document.getElementById('status');
+    statusDiv.innerText = text;
+    statusDiv.className = `mt-4 p-3 rounded-lg text-center font-medium text-sm ${colorClasses}`;
+    statusDiv.classList.remove('hidden');
+  }
+</script>

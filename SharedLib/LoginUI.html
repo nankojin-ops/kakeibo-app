@@ -1,0 +1,89 @@
+<!-- ========================================================================= -->
+<!-- 共通ライブラリ提供: ログインコンポーネント -->
+<!-- ========================================================================= -->
+<div id="sharedLoginSection" class="hidden max-w-md mx-auto bg-white rounded-xl shadow-md p-6 sm:p-8 mt-10">
+  <div class="text-center mb-6">
+    <h1 id="sharedLoginTitle" class="text-2xl font-bold text-slate-800">システムログイン</h1>
+    <p class="text-sm text-slate-500 mt-2">ログインIDとパスワードを入力してください</p>
+  </div>
+
+  <form onsubmit="handleSharedLogin(event)" class="space-y-5">
+    <div>
+      <label class="block text-sm font-semibold text-slate-700 mb-1">ログインID</label>
+      <input type="text" id="sharedLoginId" required placeholder="IDを入力" class="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+    </div>
+
+    <div>
+      <label class="block text-sm font-semibold text-slate-700 mb-1">パスワード</label>
+      <input type="password" id="sharedLoginPass" required placeholder="••••••••" class="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+    </div>
+
+    <button type="submit" id="sharedLoginBtn" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg transition-colors">ログイン</button>
+
+    <div id="sharedLoginError" class="text-red-600 text-sm font-semibold text-center mt-3 hidden p-2 bg-red-50 rounded border border-red-200"></div>
+  </form>
+</div>
+
+<script>
+/**
+ * ログインフォーム送信処理
+ * 親プロジェクト側のバックエンド関数（標準名: execLogin）を介して認証を実行します。
+ */
+function handleSharedLogin(e) {
+  e.preventDefault();
+  const id = document.getElementById('sharedLoginId').value.trim();
+  const pass = document.getElementById('sharedLoginPass').value;
+  const errorEl = document.getElementById('sharedLoginError');
+  const btn = document.getElementById('sharedLoginBtn');
+
+  if (!id || !pass) return;
+
+  errorEl.classList.add('hidden');
+  btn.disabled = true;
+  btn.innerText = '認証中...';
+
+  // 親プロジェクト側の受け口関数名を指定（既定値: execLogin）
+  const targetFunctionName = window.SHARED_LOGIN_BACKEND_FUNC || 'execLogin';
+
+  if (typeof google === 'undefined' || !google.script || !google.script.run[targetFunctionName]) {
+    btn.disabled = false;
+    btn.innerText = 'ログイン';
+    errorEl.innerText = 'エラー：親プロジェクトに ' + targetFunctionName + ' 関数が実装されていません。';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(user => {
+      btn.disabled = false;
+      btn.innerText = 'ログイン';
+      if (user && user.name) {
+        if (typeof onLoginSuccess === 'function') {
+          onLoginSuccess(user);
+        } else {
+          console.warn('呼び出し元に onLoginSuccess 関数が定義されていません。');
+        }
+      } else {
+        errorEl.innerText = 'ログイン情報が取得できませんでした。';
+        errorEl.classList.remove('hidden');
+      }
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      btn.innerText = 'ログイン';
+      if (typeof onLoginFailure === 'function') {
+        onLoginFailure(err);
+      } else {
+        errorEl.innerText = err.message || '通信エラーが発生しました。';
+        errorEl.classList.remove('hidden');
+      }
+    })
+    [targetFunctionName](id, pass);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (window.SHARED_LOGIN_TITLE) {
+    document.getElementById('sharedLoginTitle').innerText = window.SHARED_LOGIN_TITLE;
+  }
+});
+</script>
